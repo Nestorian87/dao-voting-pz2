@@ -36,6 +36,11 @@ function errorMessage(error) {
   if (error.code === "ACTION_REJECTED" || error.code === 4001) return "Ви скасували запит у гаманці.";
   if (error.code === "INVALID_ARGUMENT") return "Перевірте формат адреси отримувача й суми ETH.";
   if (error.code === "INSUFFICIENT_FUNDS") return "На гаманці бракує ETH для комісії.";
+  const rpcMessage = [error.shortMessage, error.message, error.error?.message, error.info?.error?.message,
+    error.info?.error?.data?.message, error.info?.error?.data?.originalError?.message].join(" ");
+  if (session?.local && (error.code === "NONCE_EXPIRED" || /nonce/i.test(rpcMessage))) {
+    return "Hardhat відхилив номер транзакції (nonce). Після перезапуску локальної мережі очистьте дані активності й nonce для Hardhat Local у MetaMask та повторіть дію.";
+  }
   if (errors[error.revert?.name]) return errors[error.revert.name];
   for (const contract of session?.contracts ?? []) {
     try {
@@ -49,14 +54,20 @@ function errorMessage(error) {
 
 async function transact(send) {
   if (!session || busy) return;
+  const current = session;
   busy = true;
   status("Підтвердьте транзакцію в MetaMask…");
   try {
-    const tx = await send();
+    const overrides = current.local
+      ? { nonce: await current.reader.getTransactionCount(current.account, "pending") }
+      : {};
+    if (current !== session) return;
+    const tx = await send(overrides);
     status("Очікує підтвердження мережі…");
     await tx.wait();
     status("Транзакцію підтверджено.");
   } catch (error) {
+    console.warn("DAO transaction failed", error);
     status(errorMessage(error), true);
   } finally {
     busy = false;
@@ -95,12 +106,12 @@ async function proposalCard(current, id, votingPaused, treasuryPaused) {
     const disabled = votingPaused || voted || voteWeight === 0n;
     card.append(text("p", voted ? "Ваш голос зараховано." : "Ваша вага на знімку · " + formatEther(voteWeight)));
     actions.append(
-      action("За", () => voting.connect(current.signer).vote(id, true), disabled),
-      action("Проти", () => voting.connect(current.signer).vote(id, false), disabled),
+      action("За", overrides => voting.connect(current.signer).vote(id, true, overrides), disabled),
+      action("Проти", overrides => voting.connect(current.signer).vote(id, false, overrides), disabled),
     );
   }
   if (state === 2n) {
-    actions.append(action("Виконати", () => voting.connect(current.signer).execute(id), votingPaused || treasuryPaused));
+    actions.append(action("Виконати", overrides => voting.connect(current.signer).execute(id, overrides), votingPaused || treasuryPaused));
   }
   card.append(actions);
   return card;
@@ -179,7 +190,7 @@ async function connect(interactive) {
     const treasury = new Contract(deployment.treasury, treasuryAbi.abi, reader);
     const token = new Contract(deployment.token, tokenAbi.abi, reader);
     const account = await signer.getAddress();
-    session = { account, local, signer, token, treasury, voting, contracts: [voting, treasury, token] };
+    session = { account, local, reader, signer, token, treasury, voting, contracts: [voting, treasury, token] };
     page = 0;
     $("account").textContent = account;
     $("network").textContent = deployment.label;
@@ -205,15 +216,15 @@ async function connect(interactive) {
 }
 
 $("connect").onclick = () => connect(true);
-$("delegate").onclick = () => transact(() => session.token.connect(session.signer).delegate(session.account));
-$("claim").onclick = () => transact(() => session.treasury.connect(session.signer).claim());
+$("delegate").onclick = () => transact(overrides => session.token.connect(session.signer).delegate(session.account, overrides));
+$("claim").onclick = () => transact(overrides => session.treasury.connect(session.signer).claim(overrides));
 $("newer").onclick = () => { page--; void refresh(); };
 $("older").onclick = () => { page++; void refresh(); };
 $("proposal").onsubmit = event => {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  void transact(() => session.voting.connect(session.signer).propose(
-    getAddress(data.get("recipient").trim()), parseEther(data.get("amount").trim()),
+  void transact(overrides => session.voting.connect(session.signer).propose(
+    getAddress(data.get("recipient").trim()), parseEther(data.get("amount").trim()), overrides,
   ));
 };
 window.ethereum?.on("accountsChanged", () => { if (!connecting) location.reload(); });
