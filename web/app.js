@@ -52,7 +52,7 @@ function errorMessage(error) {
   return "Операція не вдалася. Перевірте мережу, поля форми та стан контрактів.";
 }
 
-async function transact(send) {
+async function transact(prepare) {
   if (!session || busy) return;
   const current = session;
   busy = true;
@@ -62,9 +62,16 @@ async function transact(send) {
       ? { nonce: await current.reader.getTransactionCount(current.account, "pending") }
       : {};
     if (current !== session) return;
-    const tx = await send(overrides);
+    const request = await prepare(overrides);
+    const hash = await current.signer.sendUncheckedTransaction(request);
     status("Очікує підтвердження мережі…");
-    await tx.wait();
+    const receipt = await current.reader.waitForTransaction(hash, 1, 120_000);
+    if (!receipt || receipt.status !== 1) {
+      status(receipt
+        ? "Мережа відхилила транзакцію."
+        : "Підтвердження ще не надійшло. Перевірте стан транзакції в гаманці.", true);
+      return;
+    }
     status("Транзакцію підтверджено.");
   } catch (error) {
     console.warn("DAO transaction failed", error);
@@ -106,12 +113,12 @@ async function proposalCard(current, id, votingPaused, treasuryPaused) {
     const disabled = votingPaused || voted || voteWeight === 0n;
     card.append(text("p", voted ? "Ваш голос зараховано." : "Ваша вага на знімку · " + formatEther(voteWeight)));
     actions.append(
-      action("За", overrides => voting.connect(current.signer).vote(id, true, overrides), disabled),
-      action("Проти", overrides => voting.connect(current.signer).vote(id, false, overrides), disabled),
+      action("За", overrides => voting.vote.populateTransaction(id, true, overrides), disabled),
+      action("Проти", overrides => voting.vote.populateTransaction(id, false, overrides), disabled),
     );
   }
   if (state === 2n) {
-    actions.append(action("Виконати", overrides => voting.connect(current.signer).execute(id, overrides), votingPaused || treasuryPaused));
+    actions.append(action("Виконати", overrides => voting.execute.populateTransaction(id, overrides), votingPaused || treasuryPaused));
   }
   card.append(actions);
   return card;
@@ -216,14 +223,14 @@ async function connect(interactive) {
 }
 
 $("connect").onclick = () => connect(true);
-$("delegate").onclick = () => transact(overrides => session.token.connect(session.signer).delegate(session.account, overrides));
-$("claim").onclick = () => transact(overrides => session.treasury.connect(session.signer).claim(overrides));
+$("delegate").onclick = () => transact(overrides => session.token.delegate.populateTransaction(session.account, overrides));
+$("claim").onclick = () => transact(overrides => session.treasury.claim.populateTransaction(overrides));
 $("newer").onclick = () => { page--; void refresh(); };
 $("older").onclick = () => { page++; void refresh(); };
 $("proposal").onsubmit = event => {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  void transact(overrides => session.voting.connect(session.signer).propose(
+  void transact(overrides => session.voting.propose.populateTransaction(
     getAddress(data.get("recipient").trim()), parseEther(data.get("amount").trim()), overrides,
   ));
 };
