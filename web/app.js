@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, formatEther, getAddress, parseEther } from "/ethers.js";
+import { BrowserProvider, Contract, JsonRpcProvider, formatEther, getAddress, parseEther } from "/ethers.js";
 
 const $ = id => document.getElementById(id);
 const states = ["Активна", "Відхилена", "Схвалена", "Виконана"];
@@ -95,11 +95,13 @@ async function proposalCard(current, id, votingPaused, treasuryPaused) {
     const disabled = votingPaused || voted || voteWeight === 0n;
     card.append(text("p", voted ? "Ваш голос зараховано." : "Ваша вага на знімку · " + formatEther(voteWeight)));
     actions.append(
-      action("За", () => voting.vote(id, true), disabled),
-      action("Проти", () => voting.vote(id, false), disabled),
+      action("За", () => voting.connect(current.signer).vote(id, true), disabled),
+      action("Проти", () => voting.connect(current.signer).vote(id, false), disabled),
     );
   }
-  if (state === 2n) actions.append(action("Виконати", () => voting.execute(id), votingPaused || treasuryPaused));
+  if (state === 2n) {
+    actions.append(action("Виконати", () => voting.connect(current.signer).execute(id), votingPaused || treasuryPaused));
+  }
   card.append(actions);
   return card;
 }
@@ -129,8 +131,17 @@ async function refresh() {
     $("newer").disabled = page === 0;
     $("older").disabled = high <= pageSize;
     $("proposals").replaceChildren(...(cards.length ? cards : [text("p", "Пропозицій ще немає.")]));
+    $("dashboard").hidden = false;
+    if ($("status").dataset.readError === "true") status("Гаманець підключено.");
+    delete $("status").dataset.readError;
   } catch (error) {
-    if (current === session && !busy) status(errorMessage(error), true);
+    if (current === session && !busy) {
+      $("dashboard").hidden = true;
+      status(current.local
+        ? "Не вдалося прочитати контракти Hardhat. Перевірте, чи вузол запущено і чи після його запуску виконано npm run deploy:local."
+        : "Не вдалося прочитати контракти Sepolia. Перевірте з’єднання з мережею.", true);
+      $("status").dataset.readError = "true";
+    }
   } finally {
     refreshing = false;
     if (session && current !== session) void refresh();
@@ -162,15 +173,16 @@ async function connect(interactive) {
     const [votingAbi, treasuryAbi, tokenAbi] = await Promise.all(
       ["DaoVoting", "Treasury", "VoteToken"].map(name => json("/" + name + ".json")),
     );
-    const voting = new Contract(deployment.voting, votingAbi.abi, signer);
-    const treasury = new Contract(deployment.treasury, treasuryAbi.abi, signer);
-    const token = new Contract(deployment.token, tokenAbi.abi, signer);
+    const local = deployment.chainId === 31337;
+    const reader = local ? new JsonRpcProvider("http://127.0.0.1:8545", 31337) : provider;
+    const voting = new Contract(deployment.voting, votingAbi.abi, reader);
+    const treasury = new Contract(deployment.treasury, treasuryAbi.abi, reader);
+    const token = new Contract(deployment.token, tokenAbi.abi, reader);
     const account = await signer.getAddress();
-    session = { account, token, treasury, voting, contracts: [voting, treasury, token] };
+    session = { account, local, signer, token, treasury, voting, contracts: [voting, treasury, token] };
     page = 0;
     $("account").textContent = account;
     $("network").textContent = deployment.label;
-    $("dashboard").hidden = false;
     status("Гаманець підключено.");
     for (const [contract, events] of [
       [voting, ["Proposed", "Voted", "Executed", "Paused", "Unpaused"]],
@@ -193,14 +205,16 @@ async function connect(interactive) {
 }
 
 $("connect").onclick = () => connect(true);
-$("delegate").onclick = () => transact(() => session.token.delegate(session.account));
-$("claim").onclick = () => transact(() => session.treasury.claim());
+$("delegate").onclick = () => transact(() => session.token.connect(session.signer).delegate(session.account));
+$("claim").onclick = () => transact(() => session.treasury.connect(session.signer).claim());
 $("newer").onclick = () => { page--; void refresh(); };
 $("older").onclick = () => { page++; void refresh(); };
 $("proposal").onsubmit = event => {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  void transact(() => session.voting.propose(getAddress(data.get("recipient").trim()), parseEther(data.get("amount").trim())));
+  void transact(() => session.voting.connect(session.signer).propose(
+    getAddress(data.get("recipient").trim()), parseEther(data.get("amount").trim()),
+  ));
 };
 window.ethereum?.on("accountsChanged", () => { if (!connecting) location.reload(); });
 window.ethereum?.on("chainChanged", () => location.reload());
