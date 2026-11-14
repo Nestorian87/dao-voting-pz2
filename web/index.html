@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="uk">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Голосування DAO</title>
+<style>
+  :root { color-scheme: light; font: 16px/1.5 Inter, system-ui, sans-serif; color: #1a2541; background: #eef3fa; }
+  body { max-width: 820px; margin: 2rem auto; padding: 0 1rem; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+  h1 { margin: 0; } h2 { font-size: 1.2rem; margin: 0 0 .65rem; }
+  section, article { background: white; padding: 1rem; margin-top: 1rem; border: 1px solid #cfd9e9; border-radius: 9px; }
+  section section { padding: 0; border: 0; }
+  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .6rem; }
+  dt { color: #445779; } dd { margin: 0; font-weight: 650; }
+  form, nav { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+  label { flex: 1 1 12rem; } input { width: 100%; box-sizing: border-box; }
+  button, input { font: inherit; border-radius: 5px; border: 1px solid #9aabc4; padding: .45rem .65rem; }
+  button { background: #e8effa; color: #192a53; cursor: pointer; }
+  button.primary { background: #233f8e; color: white; }
+  button:disabled { opacity: .45; cursor: default; }
+  p { margin: .35rem 0; overflow-wrap: anywhere; }
+  #status { min-height: 1.6em; } [data-error] { color: #9b182b; }
+  code { overflow-wrap: anywhere; }
+</style>
+<header>
+  <h1>Голосування DAO</h1>
+  <button id="connect" class="primary">Підключити MetaMask</button>
+</header>
+<p id="status" role="status" aria-live="polite"></p>
+<main id="dashboard" hidden>
+  <section aria-label="Стан гаманця та скарбниці">
+    <p><code id="account"></code> · <span id="network"></span></p>
+    <dl>
+      <div><dt>Баланс токенів</dt><dd id="tokens"></dd></div>
+      <div><dt>Активна вага</dt><dd id="power"></dd></div>
+      <div><dt>Кворум</dt><dd id="quorum"></dd></div>
+      <div><dt>Вільно у скарбниці</dt><dd id="available"></dd></div>
+      <div><dt>Доступно вам</dt><dd id="claimable"></dd></div>
+    </dl>
+    <button id="delegate">Активувати власні голоси</button>
+    <button id="claim">Забрати виплату</button>
+  </section>
+  <section>
+    <h2>Нова пропозиція</h2>
+    <form id="proposal">
+      <label>Адреса отримувача<input name="recipient" placeholder="0x…" required></label>
+      <label>Сума ETH<input name="amount" inputmode="decimal" placeholder="0.1" required></label>
+      <button type="submit" class="primary">Створити</button>
+    </form>
+  </section>
+  <section>
+    <h2>Пропозиції</h2>
+    <div id="proposals"></div>
+    <nav aria-label="Сторінки пропозицій">
+      <button id="newer">Новіші</button>
+      <button id="older">Старіші</button>
+    </nav>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</html>
